@@ -4,6 +4,9 @@ PATH := "${CURDIR}/bin:$(PATH)"
 
 .PHONY: gobuildcache
 
+bin/gharchive:
+	${GOBUILD} -o $@ ./cmd/gharchive
+
 bin/golangci-lint:
 	script/bindown install $(notdir $@)
 
