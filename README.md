@@ -3,7 +3,7 @@
 [![godoc](https://godoc.org/github.com/WillAbides/gharchive-client?status.svg)](https://godoc.org/github.com/WillAbides/gharchive-client)
 [![ci](https://github.com/WillAbides/gharchive-client/workflows/ci/badge.svg?branch=main&event=push)](https://github.com/WillAbides/gharchive-client/actions?query=workflow%3Aci+branch%3Amaster+event%3Apush)
 
-A command line client and go package for iterating over lines from
+A command line client and go package for iterating over events from
 [gharchive](https://www.gharchive.org/).
 
 ## Command line usage
@@ -24,3 +24,8 @@ Flags:
       --no-empty-lines           skip empty lines
       --only-valid-json          skip lines that aren not valid json objects
 ```
+
+## Performance
+
+I can iterate about 45k events per second from a MacBook Pro with a cable modem.
+The bottleneck is decompressing files.
