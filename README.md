@@ -6,6 +6,10 @@
 A command line client and go package for iterating over events from
 [gharchive](https://www.gharchive.org/).
 
+## Installation
+
+Download binaries from [the latest release](https://github.com/WillAbides/gharchive-client/releases/latest)
+
 ## Command line usage
 
 ```
