@@ -4,5 +4,5 @@ set -e
 
 CDPATH="" cd -- "$(dirname -- "$(dirname -- "$0")")"
 
-make -s bin/gharchive
+go build -o bin/gharchive ./cmd/gharchive
 exec bin/gharchive "$@"

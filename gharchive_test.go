@@ -1,8 +1,8 @@
 package gharchive
 
 import (
+	"bytes"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,9 +10,9 @@ import (
 	"path"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"cloud.google.com/go/storage"
+	"github.com/klauspost/compress/gzip"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/option"
 )
@@ -27,7 +27,8 @@ func downloadTestFiles(t testing.TB) {
 	t.Helper()
 
 	dir := filepath.FromSlash("./tmp/testfiles")
-	err := os.MkdirAll(dir, 0o700)
+	shortDir := filepath.Join(dir, "short")
+	err := os.MkdirAll(shortDir, 0o700)
 	require.NoError(t, err)
 	for _, filename := range testfiles {
 		_, err = os.Stat(filepath.Join(dir, filename))
@@ -38,17 +39,53 @@ func downloadTestFiles(t testing.TB) {
 			err = nil
 		}
 		require.NoError(t, err)
-		resp, err := http.Get("https://data.gharchive.org/" + filename)
+		var resp *http.Response
+		resp, err = http.Get("https://data.gharchive.org/" + filename)
 		require.NoError(t, err)
 		require.Equal(t, 200, resp.StatusCode)
-		file, err := os.Create(filepath.Join(dir, filename))
+		var file *os.File
+		file, err = os.Create(filepath.Join(dir, filename))
 		require.NoError(t, err)
-		t.Cleanup(func() {
-			require.NoError(t, file.Close())
-			require.NoError(t, resp.Body.Close())
-		})
 		_, err = io.Copy(file, resp.Body)
+		require.NoError(t, file.Close())
+		require.NoError(t, resp.Body.Close())
 		require.NoError(t, err)
+	}
+	for _, filename := range testfiles {
+		_, err = os.Stat(filepath.Join(shortDir, filename))
+		if err == nil {
+			continue
+		}
+		if os.IsNotExist(err) {
+			err = nil
+		}
+		require.NoError(t, err)
+		infile, err := os.Open(filepath.Join(dir, filename))
+		require.NoError(t, err)
+		gzr, err := gzip.NewReader(infile)
+		require.NoError(t, err)
+		outfile, err := os.Create(filepath.Join(shortDir, filename))
+		require.NoError(t, err)
+		gzw := gzip.NewWriter(outfile)
+		ls := lineScanner{
+			br: byteReader{
+				r: gzr,
+			},
+		}
+		for i := 0; i < 10; i++ {
+			ls.scan()
+			b := ls.bytes()
+			if i == 9 {
+				b = bytes.TrimSpace(b)
+			}
+			_, err = gzw.Write(b)
+			require.NoError(t, err)
+			require.NoError(t, ls.error())
+		}
+		require.NoError(t, gzw.Close())
+		require.NoError(t, gzr.Close())
+		require.NoError(t, infile.Close())
+		require.NoError(t, outfile.Close())
 	}
 }
 
@@ -73,24 +110,23 @@ func setupTestServer(ctx context.Context, t *testing.T) *storage.Client {
 	return client
 }
 
-func TestScanner(t *testing.T) {
-	ctx := context.Background()
-	client := setupTestServer(ctx, t)
-	start := time.Date(2020, 10, 10, 8, 6, 0, 0, time.UTC)
-	end := start.Add(159 * time.Minute)
-	opts := &Options{
-		StorageClient: client,
-	}
-	scanner, err := New(ctx, start, end, opts)
+func setupShortTestServer(ctx context.Context, t *testing.T) *storage.Client {
+	t.Helper()
+	downloadTestFiles(t)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		http.ServeFile(w, req, filepath.Join("tmp", "testfiles", "short", path.Base(req.URL.Path)))
+	}))
+	t.Cleanup(func() {
+		server.Close()
+	})
+	client, err := storage.NewClient(ctx,
+		option.WithoutAuthentication(),
+		option.WithEndpoint(server.URL),
+		option.WithHTTPClient(server.Client()),
+	)
 	require.NoError(t, err)
-	var count int
-	for {
-		_, err = scanner.Next(ctx)
-		if err != nil {
-			break
-		}
-		count++
-	}
-	require.EqualError(t, err, io.EOF.Error())
-	fmt.Println(count)
+	t.Cleanup(func() {
+		require.NoError(t, client.Close())
+	})
+	return client
 }
