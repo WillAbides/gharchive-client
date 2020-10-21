@@ -13,12 +13,11 @@ Download binaries from [the latest release](https://github.com/WillAbides/gharch
 ## Command line usage
 
 ```
-$ gharchive --help
 Usage: gharchive <start> [<end>]
 
 Arguments:
   <start>    start time formatted as YYYY-MM-DD, or as an RFC3339 date
-  [<end>]    end time formatted as YYYY-MM-DD, or as an RFC3339 date. default is a day past start
+  [<end>]    end time formatted as YYYY-MM-DD, or as an RFC3339 date. default is an hour past start
 
 Flags:
   -h, --help                     Show context-sensitive help.
@@ -27,9 +26,12 @@ Flags:
       --strict-created-at        only output events with a created_at between start and end
       --no-empty-lines           skip empty lines
       --only-valid-json          skip lines that aren not valid json objects
+      --preserve-order           ensure that events are output in the same order they exist on data.gharchive.org
+      --concurrency=INT          max number of concurrent downloads to run. Ignored if --preserve-order is set. Default is the number of cpus available.
+      --debug                    output debug logs
 ```
 
 ## Performance
 
-I can iterate about 45k events per second from a MacBook Pro with a cable modem.
-The bottleneck is decompressing files.
+I can iterate about 200k events per second from an 8 core MacBook Pro with a 
+cable modem. On an 80 core server in a data center that increases to about 450k.

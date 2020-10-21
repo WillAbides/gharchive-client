@@ -2,33 +2,7 @@ package gharchive
 
 // This file is mostly copied from https://github.com/pkg/json/blob/6ff99391461697279ad9e8620e35ff567d49287c/reader.go
 
-import (
-	"bytes"
-	"io"
-)
-
-type lineScanner struct {
-	br  byteReader
-	pos int
-}
-
-func (s *lineScanner) next() []byte {
-	s.br.release(s.pos)
-	for {
-		idx := bytes.IndexByte(s.br.window(), '\n')
-		if idx >= 0 {
-			s.pos = idx + 1
-			return s.br.window()[:s.pos]
-		}
-		if s.br.extend() == 0 {
-			return s.br.window()
-		}
-	}
-}
-
-func (s *lineScanner) error() error {
-	return s.br.err
-}
+import "io"
 
 // A byteReader implements a sliding window over an io.Reader.
 type byteReader struct {

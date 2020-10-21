@@ -4,22 +4,31 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"log"
+	"os"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/willabides/gharchive-client"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 )
 
 var cli struct {
 	Start           string   `kong:"arg,help='start time formatted as YYYY-MM-DD, or as an RFC3339 date'"`
-	End             string   `kong:"arg,optional,help='end time formatted as YYYY-MM-DD, or as an RFC3339 date. default is a day past start'"`
+	End             string   `kong:"arg,optional,help='end time formatted as YYYY-MM-DD, or as an RFC3339 date. default is an hour past start'"`
 	IncludeType     []string `kong:"name=type,help='include only these event types'"`
 	ExcludeType     []string `kong:"name=not-type,help='exclude these event types'"`
 	StrictCreatedAt bool     `kong:"help='only output events with a created_at between start and end'"`
 	NoEmptyLines    bool     `kong:"help='skip empty lines'"`
 	OnlyValidJSON   bool     `kong:"help='skip lines that aren not valid json objects'"`
+	PreserveOrder   bool     `kong:"help='ensure that events are output in the same order they exist on data.gharchive.org'"`
+	Concurrency     int      `kong:"help='max number of concurrent downloads to run. Ignored if --preserve-order is set. Default is the number of cpus available.'"`
+	Debug           bool     `kong:"help='output debug logs'"`
 }
 
 func parseTimeString(st string) (tm time.Time, err error) {
@@ -38,10 +47,14 @@ func main() {
 	k := kong.Parse(&cli)
 	start, err := parseTimeString(cli.Start)
 	k.FatalIfErrorf(err, "invalid start time")
+	debugLog := log.New(ioutil.Discard, "DEBUG ", log.LstdFlags)
+	if cli.Debug {
+		debugLog.SetOutput(os.Stderr)
+	}
 	var end time.Time
 	if cli.End != "" {
 		end, err = parseTimeString(cli.End)
-		k.FatalIfErrorf(err, "invalid end time")
+		k.FatalIfErrorf(err, "invalid end time. must be either 'YYYY-MM-DD' or 'YYYY-MM-DDThh:mm:ssZ' (RFC 3339")
 	}
 	if end.IsZero() {
 		end = start.AddDate(0, 0, 1)
@@ -112,17 +125,41 @@ func main() {
 	if len(fieldValidators) > 0 {
 		validators = append(validators, gharchive.ValidateJSONFields(fieldValidators))
 	}
-	sc, err := gharchive.New(ctx, start, end, &gharchive.Options{Validators: validators})
+	if cli.Concurrency == 0 {
+		cli.Concurrency = runtime.NumCPU()
+	}
+	if cli.PreserveOrder {
+		cli.Concurrency = 1
+	}
+	debugLog.Printf("concurrency=%d", cli.Concurrency)
+	debugLog.Printf("start=%s", start.Format(time.RFC3339))
+	debugLog.Printf("end=%s", end.Format(time.RFC3339))
+	sc, err := gharchive.New(ctx, start, &gharchive.Options{
+		Validators:    validators,
+		Concurrency:   cli.Concurrency,
+		PreserveOrder: cli.PreserveOrder,
+		EndTime:       end,
+	})
 	k.FatalIfErrorf(err, "error creating scanner")
 	defer func() {
 		_ = sc.Close() //nolint:errcheck // nothing to do with this error
 	}()
-	for {
-		line, err := sc.Next(ctx)
-		if err == io.EOF || err == context.Canceled {
-			break
-		}
-		k.FatalIfErrorf(err, "error streaming from gharchive")
-		fmt.Print(string(line))
+	var lineCount int
+	scanStartTime := time.Now()
+	for sc.Scan(ctx) {
+		lineCount++
+		fmt.Print(string(sc.Bytes()))
 	}
+	scanDuration := time.Since(scanStartTime)
+	linesPerSecond := int64(float64(lineCount) / scanDuration.Seconds())
+	debugLog.Println("done")
+	debugLog.Printf("output %s lines", message.NewPrinter(language.English).Sprintf("%d", lineCount))
+	debugLog.Printf("took %0.2f seconds", scanDuration.Seconds())
+	debugLog.Printf("output %s lines per second", message.NewPrinter(language.English).Sprintf("%d", linesPerSecond))
+
+	err = sc.Err()
+	if err == io.EOF || err == context.Canceled {
+		err = nil
+	}
+	k.FatalIfErrorf(err, "error streaming from gharchive")
 }
